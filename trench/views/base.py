@@ -99,14 +99,6 @@ class MFAMethodActivationView(APIView):
             source_field = get_mfa_config_by_name_query(name=method).get(SOURCE_FIELD)
         except MFAMethodDoesNotExistError as cause:
             return ErrorResponse(error=cause)
-        if source_field is not None:
-            serializer_class = generate_model_serializer(
-                name="MFAMethodActivationValidator",
-                model=request.user.__class__,
-                fields=(source_field,),
-            )
-            serializer = serializer_class(data=request.data)
-            serializer.is_valid(raise_exception=True)
         try:
             mfa = create_mfa_method_command(
                 user_id=request.user.id,
