@@ -5,7 +5,7 @@ import string
 from rest_framework.settings import APISettings, perform_import
 from typing import Any, Dict
 
-from trench.exceptions import MethodHandlerMissingError, RestrictedCharInBackupCodeError
+from trench.exceptions import MethodHandlerMissingError
 
 
 class TrenchAPISettings(APISettings):
@@ -14,7 +14,6 @@ class TrenchAPISettings(APISettings):
     _FIELD_BACKUP_CODES_CHARACTERS = "BACKUP_CODES_CHARACTERS"
     _FIELD_MFA_METHODS = "MFA_METHODS"
     _FIELD_HANDLER = "HANDLER"
-    _RESTRICTED_BACKUP_CODES_CHARACTERS = (",",)
 
     @property
     def user_settings(self) -> Dict[str, Any]:
@@ -28,12 +27,6 @@ class TrenchAPISettings(APISettings):
         return val
 
     def _validate(self, attribute: str, value: Any) -> None:
-        if attribute == self._FIELD_BACKUP_CODES_CHARACTERS:
-            if any(char in value for char in self._RESTRICTED_BACKUP_CODES_CHARACTERS):
-                raise RestrictedCharInBackupCodeError(
-                    attribute_name=attribute,
-                    restricted_chars=self._RESTRICTED_BACKUP_CODES_CHARACTERS,
-                )
         if attribute == self._FIELD_MFA_METHODS:
             for method_name, method_config in value.items():
                 if self._FIELD_HANDLER not in method_config:
@@ -59,6 +52,9 @@ SMSAPI_ACCESS_TOKEN = "SMSAPI_ACCESS_TOKEN"
 SMSAPI_FROM_NUMBER = "SMSAPI_FROM_NUMBER"
 TWILIO_VERIFIED_FROM_NUMBER = "TWILIO_VERIFIED_FROM_NUMBER"
 YUBICLOUD_CLIENT_ID = "YUBICLOUD_CLIENT_ID"
+AWS_ACCESS_KEY = "AWS_ACCESS_KEY"
+AWS_SECRET_KEY = "AWS_SECRET_KEY"
+AWS_REGION = "AWS_REGION"
 
 DEFAULTS = {
     "USER_MFA_MODEL": "trench.MFAMethod",
@@ -88,6 +84,15 @@ DEFAULTS = {
             SOURCE_FIELD: "phone_number",
             SMSAPI_ACCESS_TOKEN: "YOUR SMSAPI TOKEN",
             SMSAPI_FROM_NUMBER: "YOUR REGISTERED NUMBER",
+        },
+        "sms_aws": {
+            VERBOSE_NAME: _("sms_aws"),
+            VALIDITY_PERIOD: 30,
+            HANDLER: "trench.backends.aws.AWSMessageDispatcher",
+            SOURCE_FIELD: "phone_number",
+            AWS_ACCESS_KEY: "YOUR AWS ACCESS KEY",
+            AWS_SECRET_KEY: "YOUR AWS SECRET KEY",
+            AWS_REGION: "YOUR AWS REGION",
         },
         "email": {
             VERBOSE_NAME: _("email"),

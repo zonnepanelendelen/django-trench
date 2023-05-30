@@ -3,15 +3,18 @@ from django.db.models import (
     CASCADE,
     BooleanField,
     CharField,
+    CheckConstraint,
     ForeignKey,
     Manager,
     Model,
+    Q,
     QuerySet,
     TextField,
+    UniqueConstraint,
 )
 from django.utils.translation import gettext_lazy as _
 
-from typing import Any, Iterable, Set
+from typing import Any, Iterable
 
 from trench.exceptions import MFAMethodDoesNotExistError
 
@@ -57,6 +60,8 @@ class MFAUserMethodManager(Manager):
 
 
 class MFAMethod(Model):
+    _BACKUP_CODES_DELIMITER = "|"
+
     user = ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=CASCADE,
@@ -72,6 +77,21 @@ class MFAMethod(Model):
     class Meta:
         verbose_name = _("MFA Method")
         verbose_name_plural = _("MFA Methods")
+        constraints = (
+            UniqueConstraint(
+                fields=("user", "name"),
+                name="unique_user_method_name",
+            ),
+            UniqueConstraint(
+                condition=Q(is_primary=True),
+                fields=("user",),
+                name="unique_user_is_primary",
+            ),
+            CheckConstraint(
+                check=(Q(is_primary=True) & Q(is_active=True)) | Q(is_primary=False),
+                name="primary_is_active",
+            ),
+        )
 
     objects = MFAUserMethodManager()
 
@@ -79,9 +99,9 @@ class MFAMethod(Model):
         return f"{self.name} (User id: {self.user_id})"
 
     @property
-    def backup_codes(self) -> Set[str]:
-        return set(self._backup_codes.split(","))
+    def backup_codes(self) -> Iterable[str]:
+        return self._backup_codes.split(self._BACKUP_CODES_DELIMITER)
 
     @backup_codes.setter
     def backup_codes(self, codes: Iterable) -> None:
-        self._backup_codes = ",".join(codes)
+        self._backup_codes = self._BACKUP_CODES_DELIMITER.join(codes)

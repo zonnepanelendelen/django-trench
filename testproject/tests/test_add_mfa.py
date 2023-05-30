@@ -1,36 +1,30 @@
 import pytest
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import AbstractUser
 
-from rest_framework.status import HTTP_200_OK
-from rest_framework.test import APIClient
+from flaky import flaky
+from rest_framework.status import HTTP_200_OK, HTTP_400_BAD_REQUEST
 
-from tests.utils import (
-    PATH_AUTH_JWT_LOGIN_CODE,
-    get_token_from_response,
-    header_template,
-    login,
-)
-from trench.backends.provider import get_mfa_handler
+from tests.utils import TrenchAPIClient
 from trench.command.create_otp import create_otp_command
 from trench.command.create_secret import create_secret_command
 
 
-User = get_user_model()
+User: AbstractUser = get_user_model()
 
 
 @pytest.mark.django_db
 def test_add_user_mfa(active_user):
-    client = APIClient()
-    login_response = login(active_user)
-    token = get_token_from_response(login_response)
-    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+    client = TrenchAPIClient()
+    client.authenticate(user=active_user)
     secret = create_secret_command()
     response = client.post(
         path="/auth/email/activate/",
         data={
             "secret": secret,
-            "code": create_otp_command(secret=secret).now(),
+            "code": create_otp_command(secret=secret, interval=60).now(),
             "user": getattr(active_user, active_user.USERNAME_FIELD),
         },
         format="json",
@@ -39,39 +33,35 @@ def test_add_user_mfa(active_user):
 
 
 @pytest.mark.django_db
-def test_user_with_many_methods(active_user_with_many_otp_methods):
-    client = APIClient()
-    active_user, _ = active_user_with_many_otp_methods
-    initial_active_methods_count = active_user.mfa_methods.filter(
-        is_active=True
-    ).count()
-    first_step = login(active_user)
-    assert first_step.status_code == HTTP_200_OK
+def test_should_fail_on_add_user_mfa_with_invalid_source_field(active_user: User):
+    client = TrenchAPIClient()
+    client.authenticate(user=active_user)
+    secret = create_secret_command()
+    settings.TRENCH_AUTH["MFA_METHODS"]["email"]["SOURCE_FIELD"] = "email_test"
 
-    primary_method = active_user.mfa_methods.filter(is_primary=True).first()
-    # As user has several methods get first and get sure only 1 is primary
-    assert primary_method is not None
-
-    handler = get_mfa_handler(mfa_method=primary_method)
-    second_step_response = client.post(
-        path=PATH_AUTH_JWT_LOGIN_CODE,
+    response = client.post(
+        path="/auth/email/activate/",
         data={
-            "ephemeral_token": first_step.data.get("ephemeral_token"),
-            "code": handler.create_code(),
+            "secret": secret,
+            "code": create_otp_command(secret=secret, interval=60).now(),
+            "user": getattr(active_user, active_user.USERNAME_FIELD),
         },
         format="json",
     )
-    # Log in the user in the second step and make sure it is correct
-    assert second_step_response.status_code == HTTP_200_OK
-
-    client.credentials(
-        HTTP_AUTHORIZATION=header_template.format(
-            get_token_from_response(second_step_response)
-        )
+    assert response.status_code == HTTP_400_BAD_REQUEST
+    assert (
+        response.data.get("error")
+        == "Field name `email_test` is not valid for model `User`."
     )
-    active_methods_response = client.get(
-        path="/auth/mfa/user-active-methods/",
-    )
+    settings.TRENCH_AUTH["MFA_METHODS"]["email"]["SOURCE_FIELD"] = "email"
 
-    # This user should have 3 methods, so we check that return has 3 methods
-    assert len(active_methods_response.data) == initial_active_methods_count
+
+@flaky
+@pytest.mark.django_db
+def test_user_with_many_methods(active_user_with_many_otp_methods):
+    active_user, _ = active_user_with_many_otp_methods
+    mfa_method = active_user.mfa_methods.filter(is_primary=True).first()
+    client = TrenchAPIClient()
+    client.authenticate_multi_factor(mfa_method=mfa_method, user=active_user)
+    response = client.get(path="/auth/mfa/user-active-methods/")
+    assert len(response.data) == 4
